@@ -78,9 +78,7 @@ jobs:
             RAW_TAG="${{ github.ref_name }}"
             CLEAN_TAG="${RAW_TAG#release/}"
             CLEAN_TAG="${CLEAN_TAG#release-}"
-            if [[ ! "$CLEAN_TAG" =~ ^v ]]; then
-              CLEAN_TAG="v${CLEAN_TAG}"
-            fi
+            CLEAN_TAG="${CLEAN_TAG#v}"
 
             git tag -f "$CLEAN_TAG"
             git push origin "$CLEAN_TAG" --force
