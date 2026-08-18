@@ -1,13 +1,14 @@
 # @cqut-openproject/cas-sdk
 
 <div align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat" alt="License: MIT"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-7+-3178c6.svg?style=flat" alt="TypeScript 7+"></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-18+-green.svg?style=flat" alt="Node.js 18+"></a>
   <a href="https://pnpm.io/"><img src="https://img.shields.io/badge/pnpm-10+-orange.svg?style=flat" alt="pnpm 10+"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat" alt="License: MIT"></a>
 </div>
 
 > [!NOTE]
-> `@cqut-openproject/cas-sdk` 是重庆理工大学统一身份认证（UIS / CAS）的独立客户端 SDK，提供跨运行时、零外部强依赖、强类型的认证流转、密码加密与票据验证能力。
+> `@cqut-openproject/cas-sdk` 是面向 TypeScript 与 JavaScript 跨运行时生态的重庆理工大学统一身份认证（UIS / CAS）客户端 SDK，提供跨运行时、零外部强依赖、强类型的认证流转、密码加密与票据验证能力。
 
 > [!CAUTION]
 > 本 SDK 在登录期间需使用学校账号与密码请求 UIS 服务端。凭据仅在客户端内存流转，请严格遵循密码学安全与隐私合规要求，切勿在不安全的日志中打印明文凭据。
@@ -19,7 +20,6 @@
 - **「网络层解耦」**：采用控制反转（IoC）架构，支持按需注入 Node `fetch`、`undici`、`axios` 或自定义代理实例
 - **「双层 API」**：提供开箱即用的一站式 `login` / `safeLogin` 流转方法与精细化的分步原子 API
 - **「生产级防御」**：内置防 XXE、防 Doctype 实体注入、64KB 响应体积上限防御与网络瞬态自动重试
-- **「现代 TypeScript 7+」**：支持 `using` / `await using` 显式资源管理（Disposable）、名义品牌类型（Branded `ServiceTicket`）与 Result 模式
 
 ## 安装
 
