@@ -23,12 +23,16 @@
 
 ## 安装
 
-### 方式一：通过 Git Release 分支安装（推荐，无需 Token / 免配置）
+### 方式一：通过 Git Release 分支 / Tag 安装（推荐，无需 Token / 免配置）
 
-仓库内置 CI 会在发版与更新时自动将包含编译产物（`dist/`）的版本同步至 `release` 分支。下游项目无需配置任何 Token 或 `.npmrc`，可直接安装：
+仓库内置 CI 会在发版与更新时自动将包含编译产物（`dist/`）的版本同步至 `release` 分支与 `v*` Tag。下游项目无需配置任何 Token 或 `.npmrc`，可直接安装：
 
 ```bash
+# 持续跟随最新稳定构建
 pnpm add github:CQUT-OpenProject/CAS-SDK#release
+
+# 或锁定具体版本 Tag（例如 v1.0.0）
+pnpm add github:CQUT-OpenProject/CAS-SDK#v1.0.0
 # 或使用 npm / yarn
 npm install github:CQUT-OpenProject/CAS-SDK#release
 ```
