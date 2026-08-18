@@ -3,7 +3,7 @@ name: Publish SDK
 on:
   push:
     branches: [master]
-    tags: ["v*"]
+    tags: ["release-*", "release/*", "v*"]
   workflow_dispatch:
 
 permissions:
@@ -43,8 +43,11 @@ jobs:
       - name: Build SDK
         run: pnpm run build
 
+      - name: Run unit tests
+        run: pnpm run test
+
       - name: Publish to GitHub Packages
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         run: |
           pnpm publish --no-git-checks || echo "Skipping package publish or already exists"
         env:
@@ -72,7 +75,13 @@ jobs:
           git push origin release --force
 
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG_NAME="${{ github.ref_name }}"
-            git tag -f "$TAG_NAME"
-            git push origin "$TAG_NAME" --force
+            RAW_TAG="${{ github.ref_name }}"
+            CLEAN_TAG="${RAW_TAG#release/}"
+            CLEAN_TAG="${CLEAN_TAG#release-}"
+            if [[ ! "$CLEAN_TAG" =~ ^v ]]; then
+              CLEAN_TAG="v${CLEAN_TAG}"
+            fi
+
+            git tag -f "$CLEAN_TAG"
+            git push origin "$CLEAN_TAG" --force
           fi
