@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, privateDecrypt, publicEncrypt, constants } from "node:crypto";
+import { createPrivateKey, generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 import {
+  base64ToBytes,
+  bigIntToBytes,
+  bytesToBigInt,
   DEFAULT_CQUT_PUBLIC_KEY_PEM,
   getSecretParam,
+  modPow,
   parseRsaPublicKey,
   rsaEncryptPkcs1,
 } from "./index.js";
@@ -15,7 +19,7 @@ test("parseRsaPublicKey parses 1024-bit CQUT public key correctly", () => {
   assert.ok(parsed.n > 0n);
 });
 
-test("rsaEncryptPkcs1 encrypts data decryptable by node:crypto private key", () => {
+test("rsaEncryptPkcs1 encrypts data decryptable with private key modulus and exponent", () => {
   const { publicKey, privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 1024,
     publicKeyEncoding: { type: "spki", format: "pem" },
@@ -28,15 +32,26 @@ test("rsaEncryptPkcs1 encrypts data decryptable by node:crypto private key", () 
   const ciphertextBytes = rsaEncryptPkcs1(plaintext, parsedKey);
   assert.equal(ciphertextBytes.length, 128);
 
-  const decrypted = privateDecrypt(
-    {
-      key: privateKey,
-      padding: constants.RSA_PKCS1_PADDING,
-    },
-    Buffer.from(ciphertextBytes),
-  );
+  // Extract JWK parameters (n, d) from privateKey for mathematical verification
+  const keyObj = createPrivateKey(privateKey);
+  const jwk = keyObj.export({ format: "jwk" });
+  assert.ok(jwk.n && jwk.d);
 
-  assert.equal(decrypted.toString("utf8"), plaintext);
+  const n = bytesToBigInt(base64ToBytes(jwk.n.replace(/-/g, "+").replace(/_/g, "/")));
+  const d = bytesToBigInt(base64ToBytes(jwk.d.replace(/-/g, "+").replace(/_/g, "/")));
+
+  // Mathematical decryption: m = c^d mod n
+  const c = bytesToBigInt(ciphertextBytes);
+  const m = modPow(c, d, n);
+  const decryptedBlock = bigIntToBytes(m, 128);
+
+  // Verify PKCS#1 v1.5 block format: 0x00 || 0x02 || [PS non-zero] || 0x00 || [plaintext]
+  assert.equal(decryptedBlock[0], 0x00);
+  assert.equal(decryptedBlock[1], 0x02);
+  const zeroIndex = decryptedBlock.indexOf(0x00, 2);
+  assert.ok(zeroIndex > 2);
+  const extractedPlaintext = new TextDecoder().decode(decryptedBlock.subarray(zeroIndex + 1));
+  assert.equal(extractedPlaintext, plaintext);
 });
 
 test("getSecretParam returns valid encoded RSA chunk payload", () => {
