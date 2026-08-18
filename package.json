@@ -1,7 +1,19 @@
 {
   "name": "@cqut-openproject/cas-sdk",
   "version": "1.0.0",
-  "description": "Cross-runtime, zero-dependency CQUT UIS / CAS authentication SDK",
+  "description": "Cross-runtime, zero-dependency CQUT UIS / CAS authentication TypeScript & JavaScript SDK",
+  "keywords": [
+    "cqut",
+    "cas",
+    "uis",
+    "sso",
+    "auth",
+    "sdk",
+    "typescript",
+    "javascript",
+    "zero-dependency",
+    "cross-runtime"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
