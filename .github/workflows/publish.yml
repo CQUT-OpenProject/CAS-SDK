@@ -1,0 +1,68 @@
+name: Publish SDK
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Build, Test and Publish SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@cqut-openproject"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm run build
+
+      - name: Run unit tests
+        run: pnpm run test
+
+      - name: Publish to GitHub Packages
+        run: |
+          pnpm publish --no-git-checks || echo "Skipping package publish or already exists"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push pre-built SDK to release branch
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          COMMIT_SHA="${GITHUB_SHA::7}"
+          WORKDIR=$(mktemp -d)
+
+          cp -r dist "$WORKDIR/dist"
+          cp package.json "$WORKDIR/package.json"
+          cp README.md "$WORKDIR/README.md"
+          [ -f LICENSE ] && cp LICENSE "$WORKDIR/LICENSE"
+
+          cd "$WORKDIR"
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b release
+          git add -f dist package.json README.md LICENSE
+          git commit -m "🚀 发布 v${VERSION} (${COMMIT_SHA})"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push origin release --force
