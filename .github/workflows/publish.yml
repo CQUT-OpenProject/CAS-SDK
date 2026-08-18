@@ -73,3 +73,9 @@ jobs:
           git commit -m "🚀 发布 v${VERSION} (${COMMIT_SHA})"
           git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           git push origin release --force
+
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+            git tag -f "$TAG_NAME"
+            git push origin "$TAG_NAME" --force
+          fi
