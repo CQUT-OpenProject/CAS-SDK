@@ -8,6 +8,7 @@ export interface HttpRequest {
 }
 
 export interface HttpResponse {
+  body?: ReadableStream<Uint8Array> | null;
   status: number;
   statusText?: string | undefined;
   headers: Headers | Record<string, string | string[] | undefined>;
