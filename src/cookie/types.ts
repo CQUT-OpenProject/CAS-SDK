@@ -1,4 +1,5 @@
 export interface Cookie {
+  hostOnly: boolean;
   name: string;
   value: string;
   domain?: string | undefined;

@@ -50,3 +50,26 @@ test("MemoryCookieJar supports Disposable with using statement", () => {
   // Exiting block scope triggers [Symbol.dispose]() which wipes cookies
   assert.equal(jarRef.getCookies("https://uis.cqut.edu.cn/").length, 0);
 });
+
+test("host-only cookies do not reach subdomains; foreign Domain is rejected", () => {
+  const jar = new MemoryCookieJar();
+  jar.setCookie("sid=secret; Path=/", "https://auth.example.com/");
+  assert.equal(jar.getCookieString("https://child.auth.example.com/"), "");
+  jar.setCookie("other=secret; Domain=foreign.test; Path=/", "https://auth.example.com/");
+  assert.equal(jar.getCookieString("https://foreign.test/"), "");
+});
+
+test("secure, path and deletion rules remain effective", () => {
+  const jar = new MemoryCookieJar();
+  jar.setCookie("sid=one; Secure; Path=/auth", "https://auth.example.com/auth/login");
+  assert.equal(jar.getCookieString("http://auth.example.com/auth"), "");
+  assert.equal(jar.getCookieString("https://auth.example.com/auth-other"), "");
+  assert.equal(jar.getCookieString("https://auth.example.com/auth/next"), "sid=one");
+  jar.setCookie("sid=gone; Secure; Path=/auth; Max-Age=0", "https://auth.example.com/auth/login");
+  assert.equal(jar.getCookieString("https://auth.example.com/auth/next"), "");
+  jar.setCookie(
+    "past=yes; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/",
+    "https://auth.example.com/",
+  );
+  assert.equal(jar.getCookieString("https://auth.example.com/"), "");
+});
