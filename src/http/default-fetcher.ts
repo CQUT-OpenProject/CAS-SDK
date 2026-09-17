@@ -1,3 +1,4 @@
+import { CasError } from "../errors/cas-error.js";
 import type { Fetcher, HttpRequest, HttpResponse } from "./types.js";
 
 /**
@@ -5,12 +6,15 @@ import type { Fetcher, HttpRequest, HttpResponse } from "./types.js";
  */
 export const defaultFetcher: Fetcher = async (request: HttpRequest): Promise<HttpResponse> => {
   if (typeof globalThis.fetch !== "function") {
-    throw new Error("globalThis.fetch is not available in the current runtime environment");
+    throw new CasError(
+      "CONFIGURATION_ERROR",
+      "globalThis.fetch is required; provide a server-side Fetcher",
+    );
   }
 
   const init: RequestInit = {
     method: request.method ?? "GET",
-    redirect: request.redirect ?? "follow",
+    redirect: "manual",
   };
   if (request.headers !== undefined) {
     init.headers = request.headers;
@@ -22,16 +26,7 @@ export const defaultFetcher: Fetcher = async (request: HttpRequest): Promise<Htt
     init.signal = request.signal;
   }
 
-  const response = await globalThis.fetch(request.url, init);
-
-  return {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-    url: response.url,
-    text: () => response.text(),
-    json: <T = unknown>() => response.json() as Promise<T>,
-  };
+  return globalThis.fetch(request.url, init);
 };
 
 /**
@@ -53,8 +48,8 @@ export function extractResponseCookies(headers: HttpResponse["headers"]): string
 
   // Plain Record object (e.g. from Axios or Node IncomingMessage)
   const rawHeaders = headers as Record<string, string | string[] | undefined>;
-  const setCookie =
-    rawHeaders["set-cookie"] ?? rawHeaders["Set-Cookie"] ?? rawHeaders["SET-COOKIE"];
+  const key = Object.keys(rawHeaders).find((name) => name.toLowerCase() === "set-cookie");
+  const setCookie = key ? rawHeaders[key] : undefined;
 
   if (Array.isArray(setCookie)) {
     return setCookie.filter((v): v is string => typeof v === "string");

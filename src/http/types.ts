@@ -1,20 +1,19 @@
 export interface HttpRequest {
   url: string;
-  method?: "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | undefined;
+  method?: "GET" | "POST" | undefined;
   headers?: Record<string, string> | undefined;
-  body?: string | Uint8Array | undefined;
-  redirect?: "follow" | "manual" | undefined;
-  signal?: AbortSignal | undefined;
+  body?: string | undefined;
+  redirect: "manual";
+  signal: AbortSignal;
 }
 
+/** A single-hop response. Preserve separate Set-Cookie values and expose the body as a stream. */
 export interface HttpResponse {
-  body?: ReadableStream<Uint8Array> | null;
   status: number;
-  statusText?: string | undefined;
   headers: Headers | Record<string, string | string[] | undefined>;
   url?: string | undefined;
-  text(): Promise<string>;
-  json<T = unknown>(): Promise<T>;
+  body: ReadableStream<Uint8Array> | null;
 }
 
+/** Reject transport failures; honor signal and never follow redirects. */
 export type Fetcher = (request: HttpRequest) => Promise<HttpResponse>;

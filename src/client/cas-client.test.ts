@@ -176,7 +176,7 @@ test("CasClient safeLogin handles rejection with typed Result error", async () =
     if (!failResult.ok) {
       assert.ok(isCasError(failResult.error));
       assert.ok(isCasErrorOfKind(failResult.error, "AUTH_FAILED"));
-      assert.equal(failResult.error.message, "账号或密码错误");
+      assert.equal(failResult.error.message, "Campus credentials rejected");
     }
   } finally {
     await mock.close();
@@ -221,7 +221,7 @@ test("CasClient throws AUTH_FAILED when credentials rejected", async () => {
       }),
       (err: unknown) => {
         if (!isCasErrorOfKind(err, "AUTH_FAILED")) return false;
-        assert.equal(err.message, "账号或密码错误");
+        assert.equal(err.message, "Campus credentials rejected");
         return true;
       },
     );
