@@ -120,9 +120,8 @@ test("CasClient completes full login flow successfully", async () => {
       validate: true,
     });
 
-    assert.equal(result.ticket, TEST_TICKET);
-    assert.ok(isServiceTicket(result.ticket));
-    assertServiceTicket(result.ticket);
+    assert.equal(result.kind, "validated");
+    assert.equal("ticket" in result, false);
     assert.equal(result.validation?.user, TEST_ACCOUNT);
     assert.ok(result.cookieJar.getCookieString(mock.baseUrl).includes("logged-in=yes"));
   } finally {
@@ -147,8 +146,8 @@ test("CasClient safeLogin returns Result pattern object", async () => {
 
     assert.equal(okResult.ok, true);
     if (okResult.ok) {
-      assert.equal(okResult.data.ticket, TEST_TICKET);
-      assert.ok(isServiceTicket(okResult.data.ticket));
+      assert.equal(okResult.data.kind, "validated");
+      okResult.data.dispose();
     }
   } finally {
     await mock.close();
@@ -230,22 +229,19 @@ test("CasClient throws AUTH_FAILED when credentials rejected", async () => {
   }
 });
 
-test("CasClient supports AsyncDisposable with [Symbol.asyncDispose]()", async () => {
+test("login result owns and disposes its session", async () => {
   const mock = await startMockServer();
-  let clientRef: CasClient;
-
   try {
-    {
-      await using client = createCasClient({
-        uisBaseUrl: mock.baseUrl,
-        applicationCode: APP_CODE,
-      });
-      clientRef = client;
-      client.defaultCookieJar.setCookie("test=1; Path=/", mock.baseUrl);
-      assert.equal(client.defaultCookieJar.getCookies(mock.baseUrl).length, 1);
-    }
-    // After exiting block scope, [Symbol.asyncDispose] clears defaultCookieJar
-    assert.equal(clientRef.defaultCookieJar.getCookies(mock.baseUrl).length, 0);
+    const client = createCasClient({ uisBaseUrl: mock.baseUrl });
+    const result = await client.login({
+      account: TEST_ACCOUNT,
+      password: TEST_PASSWORD,
+      serviceUrl: `${mock.baseUrl}/callback`,
+    });
+    assert.ok(result.cookieJar.getCookies(mock.baseUrl).length);
+    result.dispose();
+    result[Symbol.dispose]();
+    assert.equal(result.cookieJar.getCookies(mock.baseUrl).length, 0);
   } finally {
     await mock.close();
   }

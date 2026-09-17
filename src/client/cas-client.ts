@@ -26,8 +26,9 @@ import {
   type CasCredentials,
   type CasLoginOptions,
   type CasLoginResult,
+  type CasTicketResult,
+  type CasValidatedResult,
   type DoLoginResponse,
-  type EncryptedPassword,
   type LoginPageResult,
   type RequestOptions,
   type Result,
@@ -39,11 +40,11 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const DEFAULT_HEADERS = { "User-Agent": "CQUT-Auth-Service/2.0", "Accept-Language": "zh-CN" };
 
 /** Configuration only; each login result owns its session. */
-export class CasClient implements AsyncDisposable {
+export class CasClient {
   public readonly uisBaseUrl: string;
   private readonly applicationCode: string;
   private readonly fetcher: Fetcher;
-  public readonly defaultCookieJar: ICookieJar;
+  private readonly cookieJarFactory: () => ICookieJar;
   private readonly publicKey: string | undefined;
   private readonly headers: Readonly<Record<string, string>>;
 
@@ -57,20 +58,9 @@ export class CasClient implements AsyncDisposable {
     }
     this.applicationCode = options.applicationCode ?? DEFAULT_APPLICATION_CODE;
     this.fetcher = options.fetcher ?? defaultFetcher;
-    this.defaultCookieJar = options.cookieJar ?? new MemoryCookieJar();
+    this.cookieJarFactory = options.cookieJarFactory ?? (() => new MemoryCookieJar());
     this.publicKey = options.publicKey;
     this.headers = { ...DEFAULT_HEADERS, ...options.defaultHeaders };
-  }
-
-  public static encryptPassword(password: string, publicKey?: string): EncryptedPassword {
-    return getSecretParam(password, publicKey);
-  }
-
-  /**
-   * Instance method to encrypt a password using the client's configured public key.
-   */
-  public encryptPassword(password: string): EncryptedPassword {
-    return getSecretParam(password, this.publicKey);
   }
 
   public async fetchLoginPage(serviceUrl: string, options: StepOptions): Promise<LoginPageResult> {
@@ -279,78 +269,67 @@ export class CasClient implements AsyncDisposable {
     return parseCasValidationResponse(await readResponse(res, signal, step, "VALIDATION_FAILED"));
   }
 
+  public login(options: CasLoginOptions & { validate: true }): Promise<CasValidatedResult>;
+  public login(options: CasLoginOptions & { validate?: false }): Promise<CasTicketResult>;
+  public login(options: CasLoginOptions): Promise<CasLoginResult>;
   public async login(options: CasLoginOptions): Promise<CasLoginResult> {
-    const jar = new MemoryCookieJar(); // isolated session jar per login flow
-    const stepOpts: StepOptions = {
+    const signal = deadline(options.signal, options.timeoutMs);
+    const jar = this.cookieJarFactory();
+    const steps: StepOptions = {
+      cookieJar: jar,
+      signal,
+      timeoutMs: options.timeoutMs,
       applicationCode: options.applicationCode,
-      cookieJar: jar,
-      signal: options.signal,
     };
-
-    // 1. Initial login page
-    const pageResult = await this.fetchLoginPage(options.serviceUrl, stepOpts);
-
-    // 2. Do login
-    await this.doLogin(
-      {
-        account: options.account,
-        password: options.password,
-      },
-      pageResult.finalUrl,
-      stepOpts,
-    );
-
-    // 3. Acquire service ticket
-    const ticket = await this.acquireServiceTicket(
-      pageResult.casLoginUrl,
-      pageResult.serviceWithClientId,
-      pageResult.finalUrl,
-      stepOpts,
-    );
-
-    // 4. Optional validate
-    let validation: CasValidationSuccess | undefined;
-    if (options.validate) {
-      validation = await this.validateServiceTicket(
-        ticket,
-        pageResult.serviceWithClientId,
-        stepOpts,
+    try {
+      const page = await this.fetchLoginPage(options.serviceUrl, steps);
+      await this.doLogin(options, page.finalUrl, steps);
+      const ticket = await this.acquireServiceTicket(
+        page.casLoginUrl,
+        page.serviceWithClientId,
+        page.finalUrl,
+        steps,
       );
+      let disposed = false;
+      const dispose = () => {
+        if (!disposed) {
+          disposed = true;
+          jar.clear();
+        }
+      };
+      const session = {
+        serviceWithClientId: page.serviceWithClientId,
+        cookieJar: jar,
+        dispose,
+        [Symbol.dispose]: dispose,
+      };
+      if (options.validate)
+        return {
+          ...session,
+          kind: "validated",
+          validation: await this.validateServiceTicket(ticket, page.serviceWithClientId, steps),
+        };
+      return { ...session, kind: "ticket", ticket };
+    } catch (error) {
+      jar.clear();
+      throw error;
     }
-
-    return {
-      ticket,
-      serviceWithClientId: pageResult.serviceWithClientId,
-      cookieJar: jar,
-      ...(validation ? { validation } : {}),
-    };
   }
 
-  /**
-   * Functional Result-based login flow. Does not throw on expected authentication or network errors.
-   */
+  public safeLogin(
+    options: CasLoginOptions & { validate: true },
+  ): Promise<Result<CasValidatedResult, CasError>>;
+  public safeLogin(
+    options: CasLoginOptions & { validate?: false },
+  ): Promise<Result<CasTicketResult, CasError>>;
+  public safeLogin(options: CasLoginOptions): Promise<Result<CasLoginResult, CasError>>;
   public async safeLogin(options: CasLoginOptions): Promise<Result<CasLoginResult, CasError>> {
     try {
-      const data = await this.login(options);
-      return { ok: true, data };
-    } catch (err: unknown) {
-      if (err instanceof CasError) {
-        return { ok: false, error: err };
-      }
-      const wrapped = new CasError(
-        "NETWORK_ERROR",
-        err instanceof Error ? err.message : "Unknown error during CAS login",
-        { cause: err },
-      );
-      return { ok: false, error: wrapped };
+      return { ok: true, data: await this.login(options) };
+    } catch (error) {
+      if (error instanceof CasError) return { ok: false, error };
+      throw error;
     }
-  }
-
-  /**
-   * Asynchronous resource disposal for `await using` statements.
-   */
-  public async [Symbol.asyncDispose](): Promise<void> {
-    this.defaultCookieJar.clear();
   }
 
   private checkUpstream(res: HttpResponse, step: string): void {
