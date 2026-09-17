@@ -39,7 +39,7 @@ export function isServiceTicket(value: unknown): value is ServiceTicket {
  */
 export function assertServiceTicket(value: unknown): asserts value is ServiceTicket {
   if (!isServiceTicket(value)) {
-    throw new TypeError(`Value is not a valid CAS ServiceTicket: ${String(value)}`);
+    throw new TypeError("Value is not a valid CAS ServiceTicket");
   }
 }
 
@@ -47,12 +47,12 @@ export interface CasClientOptions {
   readonly uisBaseUrl?: string | undefined;
   readonly applicationCode?: string | undefined;
   readonly fetcher?: Fetcher | undefined;
-  readonly cookieJar?: ICookieJar | undefined;
+  readonly cookieJarFactory?: (() => ICookieJar) | undefined;
   readonly publicKey?: string | undefined;
   readonly defaultHeaders?: Readonly<Record<string, string>> | undefined;
 }
 
-export interface StepOptions {
+export interface RequestOptions {
   readonly applicationCode?: string | undefined;
   readonly cookieJar?: ICookieJar | undefined;
   readonly signal?: AbortSignal | undefined;
@@ -60,7 +60,9 @@ export interface StepOptions {
   readonly headers?: Readonly<Record<string, string>> | undefined;
 }
 
-export type RequestOptions = StepOptions;
+export interface StepOptions extends RequestOptions {
+  readonly cookieJar: ICookieJar;
+}
 
 export interface CasCredentials {
   readonly account: string;
@@ -80,9 +82,7 @@ export interface DoLoginResponse {
   readonly code: 200;
 }
 
-export interface CasLoginOptions {
-  readonly account: string;
-  readonly password: string;
+export interface CasLoginOptions extends CasCredentials {
   readonly serviceUrl: string;
   readonly applicationCode?: string | undefined;
   readonly validate?: boolean | undefined;
@@ -90,9 +90,20 @@ export interface CasLoginOptions {
   readonly timeoutMs?: number | undefined;
 }
 
-export interface CasLoginResult {
-  readonly ticket: ServiceTicket;
+export interface CasSession extends Disposable {
   readonly serviceWithClientId: string;
   readonly cookieJar: ICookieJar;
-  readonly validation?: CasValidationSuccess | undefined;
+  dispose(): void;
 }
+
+export interface CasTicketResult extends CasSession {
+  readonly kind: "ticket";
+  readonly ticket: ServiceTicket;
+}
+
+export interface CasValidatedResult extends CasSession {
+  readonly kind: "validated";
+  readonly validation: CasValidationSuccess;
+}
+
+export type CasLoginResult = CasTicketResult | CasValidatedResult;
