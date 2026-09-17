@@ -4,6 +4,14 @@ import type { ICookieJar } from "../cookie/types.js";
 import { getSecretParam } from "../crypto/encryptor.js";
 import { CasError } from "../errors/cas-error.js";
 import { defaultFetcher, extractResponseCookies, getHeader } from "../http/default-fetcher.js";
+import {
+  abortable,
+  abortError,
+  deadline,
+  discard,
+  readResponse,
+  retryDelay,
+} from "../http/response.js";
 import type { Fetcher, HttpRequest, HttpResponse } from "../http/types.js";
 import { parseCasValidationResponse, type CasValidationSuccess } from "../parser/cas-xml.js";
 import {
@@ -13,7 +21,7 @@ import {
   resolveCasLoginUrl,
 } from "./endpoints.js";
 import {
-  assertServiceTicket,
+  isServiceTicket,
   type CasClientOptions,
   type CasCredentials,
   type CasLoginOptions,
@@ -21,36 +29,39 @@ import {
   type DoLoginResponse,
   type EncryptedPassword,
   type LoginPageResult,
+  type RequestOptions,
   type Result,
   type ServiceTicket,
   type StepOptions,
 } from "./types.js";
 
-const DEFAULT_HEADERS = {
-  "User-Agent": "CQUT-Auth-Service/1.0",
-  "Accept-Language": "zh-CN",
-} as const satisfies Record<string, string>;
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+const DEFAULT_HEADERS = { "User-Agent": "CQUT-Auth-Service/2.0", "Accept-Language": "zh-CN" };
 
+/** Configuration only; each login result owns its session. */
 export class CasClient implements AsyncDisposable {
   public readonly uisBaseUrl: string;
-  public readonly defaultApplicationCode: string;
-  public readonly fetcher: Fetcher;
+  private readonly applicationCode: string;
+  private readonly fetcher: Fetcher;
   public readonly defaultCookieJar: ICookieJar;
-  public readonly publicKey: string | undefined;
-  public readonly defaultHeaders: Readonly<Record<string, string>>;
+  private readonly publicKey: string | undefined;
+  private readonly headers: Readonly<Record<string, string>>;
 
   constructor(options: CasClientOptions = {}) {
     this.uisBaseUrl = normalizeBaseUrl(options.uisBaseUrl ?? DEFAULT_UIS_BASE_URL);
-    this.defaultApplicationCode = options.applicationCode ?? DEFAULT_APPLICATION_CODE;
+    try {
+      const url = new URL(this.uisBaseUrl);
+      if (!["http:", "https:"].includes(url.protocol)) throw new Error("Unsupported protocol");
+    } catch (cause) {
+      throw new CasError("CONFIGURATION_ERROR", "Invalid UIS base URL", { cause });
+    }
+    this.applicationCode = options.applicationCode ?? DEFAULT_APPLICATION_CODE;
     this.fetcher = options.fetcher ?? defaultFetcher;
     this.defaultCookieJar = options.cookieJar ?? new MemoryCookieJar();
     this.publicKey = options.publicKey;
-    this.defaultHeaders = options.defaultHeaders ?? DEFAULT_HEADERS;
+    this.headers = { ...DEFAULT_HEADERS, ...options.defaultHeaders };
   }
 
-  /**
-   * Static helper to encrypt a password.
-   */
   public static encryptPassword(password: string, publicKey?: string): EncryptedPassword {
     return getSecretParam(password, publicKey);
   }
@@ -62,255 +73,212 @@ export class CasClient implements AsyncDisposable {
     return getSecretParam(password, this.publicKey);
   }
 
-  /**
-   * Step 1: Fetches initial login page and establishes session cookies.
-   */
-  public async fetchLoginPage(
-    serviceUrl: string,
-    options: StepOptions = {},
-  ): Promise<LoginPageResult> {
-    const jar = options.cookieJar ?? this.defaultCookieJar;
-    const appCode = options.applicationCode ?? this.defaultApplicationCode;
-    const url = `${this.uisBaseUrl}/center-auth-server/${appCode}/cas/login?service=${encodeURIComponent(serviceUrl)}&applicationCode=${encodeURIComponent(appCode)}`;
-
-    const headers: Record<string, string> = {
-      ...this.defaultHeaders,
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  public async fetchLoginPage(serviceUrl: string, options: StepOptions): Promise<LoginPageResult> {
+    const step = "fetchLoginPage";
+    const signal = deadline(options.signal, options.timeoutMs);
+    const appCode = options.applicationCode ?? this.applicationCode;
+    let url = `${this.uisBaseUrl}/center-auth-server/${encodeURIComponent(appCode)}/cas/login?service=${encodeURIComponent(serviceUrl)}&applicationCode=${encodeURIComponent(appCode)}`;
+    const headers = {
+      ...this.headers,
+      Accept: "text/html,application/xml",
       Referer: serviceUrl,
-      ...(options.headers ?? {}),
+      ...options.headers,
     };
-
-    const res = await this.fetchWithRetry(
-      {
-        url,
-        method: "GET",
-        headers,
-        signal: options.signal,
-      },
-      jar,
-    );
-
-    if (res.status >= 500) {
-      throw new CasError("UPSTREAM_ERROR", `UIS login service unavailable (status ${res.status})`, {
-        status: res.status,
-      });
-    }
-
-    const finalUrl = res.url || url;
     let serviceWithClientId = serviceUrl;
-    try {
-      const parsed = new URL(finalUrl);
-      serviceWithClientId = parsed.searchParams.get("service") ?? serviceUrl;
-    } catch {
-      // noop
+    for (let redirects = 0; ; redirects++) {
+      let res: HttpResponse | undefined;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          res = await this.request(
+            { url, headers, method: "GET", signal, redirect: "manual" },
+            options.cookieJar,
+            step,
+          );
+          if (res.status < 500 || attempt === 1) break;
+          discard(res);
+        } catch (error) {
+          if (attempt === 1 || !(error instanceof CasError) || error.kind !== "NETWORK_ERROR")
+            throw error;
+        }
+        await retryDelay(signal);
+      }
+      if (!res) throw new CasError("NETWORK_ERROR", "fetchLoginPage: request failed", { step });
+      discard(res);
+      this.checkUpstream(res, step);
+      const finalUrl = res.url || url;
+      serviceWithClientId = new URL(finalUrl).searchParams.get("service") ?? serviceWithClientId;
+      if (!REDIRECTS.has(res.status)) {
+        if (res.status !== 200)
+          throw new CasError("PROTOCOL_ERROR", "fetchLoginPage: unexpected HTTP status", {
+            step,
+            status: res.status,
+          });
+        return {
+          finalUrl,
+          serviceWithClientId,
+          casLoginUrl: resolveCasLoginUrl(this.uisBaseUrl, finalUrl, appCode),
+        };
+      }
+      if (redirects === 5)
+        throw new CasError("PROTOCOL_ERROR", "fetchLoginPage: too many redirects", { step });
+      const location = getHeader(res.headers, "location");
+      let next: URL;
+      try {
+        if (!location) throw new Error("Missing Location");
+        next = new URL(location, finalUrl);
+        if (!["http:", "https:"].includes(next.protocol))
+          throw new Error("Unsupported redirect protocol");
+      } catch (cause) {
+        throw new CasError("PROTOCOL_ERROR", "fetchLoginPage: invalid redirect", { step, cause });
+      }
+      if (next.origin !== new URL(finalUrl).origin) {
+        for (const key of Object.keys(headers))
+          if (["cookie", "authorization"].includes(key.toLowerCase()))
+            delete (headers as Record<string, string>)[key];
+      }
+      url = next.href;
     }
-
-    const casLoginUrl = resolveCasLoginUrl(this.uisBaseUrl, finalUrl, appCode);
-
-    return {
-      finalUrl,
-      serviceWithClientId,
-      casLoginUrl,
-    };
   }
 
-  /**
-   * Step 2: Posts credentials to /sso/doLogin.
-   */
   public async doLogin(
     credentials: CasCredentials,
     refererUrl: string,
-    options: StepOptions = {},
+    options: StepOptions,
   ): Promise<DoLoginResponse> {
-    const jar = options.cookieJar ?? this.defaultCookieJar;
-    const url = `${this.uisBaseUrl}/center-auth-server/sso/doLogin`;
-
-    const payload = JSON.stringify({
+    const step = "doLogin";
+    const signal = deadline(options.signal, options.timeoutMs);
+    const body = JSON.stringify({
       loginType: credentials.loginType ?? "login",
       name: credentials.account,
-      pwd: this.encryptPassword(credentials.password),
+      pwd: getSecretParam(credentials.password, this.publicKey),
       universityId: credentials.universityId ?? "100005",
       verifyCode: credentials.verifyCode ?? null,
     });
-
-    const headers: Record<string, string> = {
-      ...this.defaultHeaders,
-      "Content-Type": "application/json, application/json;charset=UTF-8",
-      Referer: refererUrl,
-      ...(options.headers ?? {}),
-    };
-
-    const res = await this.executeRequest(
+    const res = await this.request(
       {
-        url,
+        url: `${this.uisBaseUrl}/center-auth-server/sso/doLogin`,
         method: "POST",
-        headers,
-        body: payload,
-        signal: options.signal,
-      },
-      jar,
-    );
-
-    if (res.status >= 500) {
-      throw new CasError(
-        "UPSTREAM_ERROR",
-        `UIS doLogin service unavailable (status ${res.status})`,
-        {
-          status: res.status,
+        headers: {
+          ...this.headers,
+          "Content-Type": "application/json;charset=UTF-8",
+          Referer: refererUrl,
+          ...options.headers,
         },
-      );
-    }
-
-    let data: Record<string, unknown> | null = null;
+        body,
+        signal,
+        redirect: "manual",
+      },
+      options.cookieJar,
+      step,
+    );
+    this.checkUpstream(res, step);
+    const text = await readResponse(res, signal, step, "PROTOCOL_ERROR");
+    let data: unknown;
     try {
-      data = (await res.json()) as Record<string, unknown>;
+      data = JSON.parse(text);
     } catch {
-      try {
-        const text = await res.text();
-        data = JSON.parse(text) as Record<string, unknown>;
-      } catch {
-        throw new CasError("UPSTREAM_ERROR", "Invalid response from UIS doLogin", {
-          status: res.status,
-        });
-      }
-    }
-
-    const code = Number(data?.["code"]);
-    const rawMsg = data?.["msg"];
-    const msg = typeof rawMsg === "string" ? rawMsg : undefined;
-
-    if (res.status >= 400 || code !== 200) {
-      const errMsg = msg ?? "campus credentials rejected";
-      if (/验证码|captcha/i.test(errMsg)) {
-        throw new CasError("CAPTCHA_REQUIRED", errMsg, {
-          status: res.status,
-          rawResponse: data,
-        });
-      }
-      throw new CasError("AUTH_FAILED", errMsg, {
+      throw new CasError("PROTOCOL_ERROR", "doLogin: invalid JSON response", {
+        step,
         status: res.status,
-        rawResponse: data,
       });
     }
-
-    return {
-      code,
-      msg,
-      raw: data,
-    };
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !("code" in data) ||
+      !["number", "string"].includes(typeof data.code) ||
+      !Number.isFinite(Number(data.code))
+    )
+      throw new CasError("PROTOCOL_ERROR", "doLogin: missing response code", {
+        step,
+        status: res.status,
+      });
+    if (res.status >= 300 && res.status < 400)
+      throw new CasError("PROTOCOL_ERROR", "doLogin: unexpected redirect", {
+        step,
+        status: res.status,
+      });
+    if (res.status >= 400 || Number(data.code) !== 200) {
+      const captcha =
+        "msg" in data && typeof data.msg === "string" && /验证码|captcha/i.test(data.msg);
+      throw new CasError(
+        captcha ? "CAPTCHA_REQUIRED" : "AUTH_FAILED",
+        captcha ? "Captcha required" : "Campus credentials rejected",
+        { step, status: res.status },
+      );
+    }
+    return { code: 200 };
   }
 
-  /**
-   * Step 3: Follows CAS login with session to obtain the service ticket.
-   */
   public async acquireServiceTicket(
     casLoginUrl: string,
     serviceWithClientId: string,
     refererUrl: string,
-    options: StepOptions = {},
+    options: StepOptions,
   ): Promise<ServiceTicket> {
-    const jar = options.cookieJar ?? this.defaultCookieJar;
-    const url = `${casLoginUrl}?service=${encodeURIComponent(serviceWithClientId)}`;
-
-    const headers: Record<string, string> = {
-      ...this.defaultHeaders,
-      Referer: refererUrl,
-      ...(options.headers ?? {}),
-    };
-
-    const res = await this.fetchWithRetry(
+    const step = "acquireServiceTicket";
+    const signal = deadline(options.signal, options.timeoutMs);
+    const url = new URL(casLoginUrl);
+    url.searchParams.set("service", serviceWithClientId);
+    const res = await this.request(
       {
-        url,
+        url: url.href,
         method: "GET",
-        headers,
+        headers: { ...this.headers, Referer: refererUrl, ...options.headers },
         redirect: "manual",
-        signal: options.signal,
+        signal,
       },
-      jar,
+      options.cookieJar,
+      step,
     );
-
-    if (res.status >= 500) {
-      throw new CasError(
-        "UPSTREAM_ERROR",
-        `UIS CAS login service unavailable (status ${res.status})`,
-        {
-          status: res.status,
-        },
-      );
-    }
-
+    discard(res);
+    this.checkUpstream(res, step);
     const location = getHeader(res.headers, "location");
     let ticket: string | null = null;
-    if (res.status >= 300 && res.status < 400 && typeof location === "string") {
+    if (REDIRECTS.has(res.status) && location) {
       try {
         ticket = new URL(location, casLoginUrl).searchParams.get("ticket");
       } catch {
-        // invalid redirect
+        /* handled below */
       }
     }
-
-    if (!ticket || !ticket.startsWith("ST-")) {
-      throw new CasError("PROTOCOL_ERROR", "campus cas service ticket was not issued", {
+    if (!isServiceTicket(ticket))
+      throw new CasError("PROTOCOL_ERROR", "acquireServiceTicket: ticket was not issued", {
+        step,
         status: res.status,
-        rawResponse: { location, status: res.status },
       });
-    }
-
-    assertServiceTicket(ticket);
     return ticket;
   }
 
-  /**
-   * Step 4: Validates service ticket against /cas/serviceValidate.
-   */
   public async validateServiceTicket(
     ticket: string,
     serviceUrl: string,
-    options: StepOptions = {},
+    options: RequestOptions = {},
   ): Promise<CasValidationSuccess> {
-    const jar = options.cookieJar ?? this.defaultCookieJar;
-    const url = `${this.uisBaseUrl}/center-auth-server/cas/serviceValidate?service=${encodeURIComponent(serviceUrl)}&ticket=${encodeURIComponent(ticket)}`;
-
-    const headers: Record<string, string> = {
-      ...this.defaultHeaders,
-      Accept: "application/xml",
-      ...(options.headers ?? {}),
-    };
-
-    const res = await this.executeRequest(
+    const step = "validateServiceTicket";
+    const signal = deadline(options.signal, options.timeoutMs);
+    const res = await this.request(
       {
-        url,
+        url: `${this.uisBaseUrl}/center-auth-server/cas/serviceValidate?service=${encodeURIComponent(serviceUrl)}&ticket=${encodeURIComponent(ticket)}`,
         method: "GET",
-        headers,
+        headers: { ...this.headers, Accept: "application/xml", ...options.headers },
         redirect: "manual",
-        signal: options.signal,
+        signal,
       },
-      jar,
+      options.cookieJar,
+      step,
     );
-
-    if (res.status >= 500) {
-      throw new CasError(
-        "UPSTREAM_ERROR",
-        `UIS CAS serviceValidate unavailable (status ${res.status})`,
-        {
-          status: res.status,
-        },
-      );
-    }
-
+    this.checkUpstream(res, step);
     if (res.status !== 200) {
-      throw new CasError("VALIDATION_FAILED", `CAS validation returned HTTP status ${res.status}`, {
+      discard(res);
+      throw new CasError("VALIDATION_FAILED", "validateServiceTicket: unexpected HTTP status", {
+        step,
         status: res.status,
       });
     }
-
-    const text = await res.text();
-    return parseCasValidationResponse(text);
+    return parseCasValidationResponse(await readResponse(res, signal, step, "VALIDATION_FAILED"));
   }
 
-  /**
-   * High-level complete flow: fetches login page, executes doLogin, obtains ticket, and optionally validates ticket.
-   */
   public async login(options: CasLoginOptions): Promise<CasLoginResult> {
     const jar = new MemoryCookieJar(); // isolated session jar per login flow
     const stepOpts: StepOptions = {
@@ -385,71 +353,49 @@ export class CasClient implements AsyncDisposable {
     this.defaultCookieJar.clear();
   }
 
-  private async executeRequest(req: HttpRequest, jar: ICookieJar): Promise<HttpResponse> {
-    const cookieHeader = jar.getCookieString(req.url);
-    const headers: Record<string, string> = {
-      ...(req.headers ?? {}),
-    };
-    if (cookieHeader) {
-      headers["Cookie"] = cookieHeader;
+  private checkUpstream(res: HttpResponse, step: string): void {
+    if (res.status >= 500) {
+      discard(res);
+      throw new CasError("UPSTREAM_ERROR", `${step}: UIS service unavailable`, {
+        step,
+        status: res.status,
+      });
     }
+  }
 
+  private async request(
+    req: HttpRequest,
+    jar: ICookieJar | undefined,
+    step: string,
+  ): Promise<HttpResponse> {
+    if (req.signal.aborted) throw abortError(req.signal, step);
+    const headers = { ...req.headers };
+    const cookie = jar?.getCookieString(req.url);
+    if (cookie) {
+      for (const key of Object.keys(headers))
+        if (key.toLowerCase() === "cookie") delete headers[key];
+      headers.Cookie = cookie;
+    }
+    let res: HttpResponse;
     try {
-      const res = await this.fetcher({
-        ...req,
-        headers,
+      const pending = this.fetcher({ ...req, headers }).then((response) => {
+        if (req.signal.aborted) {
+          discard(response);
+          throw abortError(req.signal, step);
+        }
+        return response;
       });
-
-      // Save returned cookies
-      const cookies = extractResponseCookies(res.headers);
-      if (cookies.length > 0) {
-        jar.setCookies(cookies, req.url);
-      }
-
-      return res;
-    } catch (err: unknown) {
-      if (err instanceof CasError) {
-        throw err;
-      }
-      const message = err instanceof Error ? err.message : "Network request failed";
-      throw new CasError("NETWORK_ERROR", `Network error requesting ${req.url}: ${message}`, {
-        cause: err,
-      });
+      res = await abortable(pending, req.signal, step);
+    } catch (cause) {
+      if (req.signal.aborted) throw abortError(req.signal, step);
+      if (cause instanceof CasError) throw cause;
+      throw new CasError("NETWORK_ERROR", `${step}: request failed`, { step, cause });
     }
-  }
-
-  private async fetchWithRetry(req: HttpRequest, jar: ICookieJar): Promise<HttpResponse> {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const res = await this.executeRequest(req, jar);
-        if (res.status < 500 || attempt === 2) {
-          return res;
-        }
-      } catch (err: unknown) {
-        if (attempt === 2) {
-          throw err;
-        }
-        // Transient network error retry
-        if (err instanceof CasError && err.kind === "NETWORK_ERROR") {
-          // allow retry
-        } else {
-          throw err;
-        }
-      }
-      await sleep(250);
-    }
-
-    throw new CasError("UPSTREAM_ERROR", `Request failed after retries: ${req.url}`);
+    jar?.setCookies(extractResponseCookies(res.headers), res.url || req.url);
+    return res;
   }
 }
 
-/**
- * Factory function with const type parameter for ergonomic client creation.
- */
-export function createCasClient<const T extends CasClientOptions>(options?: T): CasClient {
+export function createCasClient(options?: CasClientOptions): CasClient {
   return new CasClient(options);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

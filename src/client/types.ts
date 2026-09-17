@@ -56,8 +56,11 @@ export interface StepOptions {
   readonly applicationCode?: string | undefined;
   readonly cookieJar?: ICookieJar | undefined;
   readonly signal?: AbortSignal | undefined;
+  readonly timeoutMs?: number | undefined;
   readonly headers?: Readonly<Record<string, string>> | undefined;
 }
+
+export type RequestOptions = StepOptions;
 
 export interface CasCredentials {
   readonly account: string;
@@ -74,9 +77,7 @@ export interface LoginPageResult {
 }
 
 export interface DoLoginResponse {
-  readonly code: number;
-  readonly msg?: string | undefined;
-  readonly raw: unknown;
+  readonly code: 200;
 }
 
 export interface CasLoginOptions {
@@ -86,6 +87,7 @@ export interface CasLoginOptions {
   readonly applicationCode?: string | undefined;
   readonly validate?: boolean | undefined;
   readonly signal?: AbortSignal | undefined;
+  readonly timeoutMs?: number | undefined;
 }
 
 export interface CasLoginResult {

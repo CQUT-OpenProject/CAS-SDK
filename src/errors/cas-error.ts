@@ -14,14 +14,12 @@ export interface CasErrorOptions {
   status?: number | undefined;
   cause?: unknown;
   step?: string | undefined;
-  rawResponse?: unknown;
 }
 
 export class CasError extends Error {
   public readonly kind: CasErrorKind;
   public readonly status: number | undefined;
   public readonly step: string | undefined;
-  public readonly rawResponse: unknown;
 
   constructor(kind: CasErrorKind, message: string, options?: CasErrorOptions) {
     super(message);
@@ -29,7 +27,6 @@ export class CasError extends Error {
     this.kind = kind;
     this.status = options?.status;
     this.step = options?.step;
-    this.rawResponse = options?.rawResponse;
     if (options?.cause !== undefined) {
       this.cause = options.cause;
     }
