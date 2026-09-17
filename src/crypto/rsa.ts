@@ -1,3 +1,4 @@
+import { CasError } from "../errors/cas-error.js";
 /**
  * Pure TypeScript RSA PKCS#1 v1.5 encryption implementation using native BigInt.
  * Cross-runtime: Works in Node.js, Cloudflare Workers, Edge, Deno, Bun, and Browsers with zero external dependencies.
@@ -18,8 +19,14 @@ export function parseRsaPublicKey(pemOrBase64: string): RsaPublicKey {
     .replace(/-----END [^-]+-----/g, "")
     .replace(/\s+/g, "");
 
-  const der = base64ToBytes(cleanBase64);
-  return parseDerPublicKey(der);
+  try {
+    const key = parseDerPublicKey(base64ToBytes(cleanBase64));
+    if (key.keyLength < 12 || key.n <= 0n || key.e < 3n || key.e % 2n === 0n)
+      throw new Error("Invalid RSA key");
+    return key;
+  } catch (cause) {
+    throw new CasError("CRYPTO_ERROR", "Invalid RSA public key", { cause });
+  }
 }
 
 /**
@@ -30,7 +37,8 @@ export function rsaEncryptPkcs1(data: string | Uint8Array, key: RsaPublicKey): U
   const k = key.keyLength;
 
   if (messageBytes.length > k - 11) {
-    throw new Error(
+    throw new CasError(
+      "CRYPTO_ERROR",
       `Message too long for RSA PKCS#1 v1.5: max length is ${k - 11} bytes, got ${messageBytes.length}`,
     );
   }
@@ -76,28 +84,12 @@ export function modPow(base: bigint, exp: bigint, mod: bigint): bigint {
 }
 
 function getRandomNonZeroBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length);
-  if (
-    typeof globalThis.crypto !== "undefined" &&
-    typeof globalThis.crypto.getRandomValues === "function"
-  ) {
-    for (let i = 0; i < length; i++) {
-      let b = 0;
-      while (b === 0) {
-        const buf = new Uint8Array(1);
-        globalThis.crypto.getRandomValues(buf);
-        b = buf[0] ?? 0;
-      }
-      bytes[i] = b;
-    }
-  } else {
-    for (let i = 0; i < length; i++) {
-      let b = 0;
-      while (b === 0) {
-        b = Math.floor(Math.random() * 255) + 1;
-      }
-      bytes[i] = b;
-    }
+  if (typeof globalThis.crypto?.getRandomValues !== "function") {
+    throw new CasError("CONFIGURATION_ERROR", "A secure Web Crypto random source is required");
+  }
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(length));
+  for (let i = 0; i < bytes.length; i++) {
+    while (bytes[i] === 0) globalThis.crypto.getRandomValues(bytes.subarray(i, i + 1));
   }
   return bytes;
 }
@@ -133,63 +125,13 @@ export function bigIntToBytes(value: bigint, length: number): Uint8Array {
 }
 
 export function base64ToBytes(base64: string): Uint8Array {
-  if (typeof globalThis.atob === "function") {
-    const binary = globalThis.atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  }
-
-  // Fallback for environments where atob is not available
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-  let str = base64.replace(/[=]+$/, "");
-  const len = str.length;
-  const bytes: number[] = [];
-
-  for (let i = 0; i < len; i += 4) {
-    const b1 = chars.indexOf(str.charAt(i));
-    const b2 = chars.indexOf(str.charAt(i + 1));
-    const b3 = chars.indexOf(str.charAt(i + 2));
-    const b4 = chars.indexOf(str.charAt(i + 3));
-
-    const n = (b1 << 18) | (b2 << 12) | ((b3 >= 0 ? b3 : 0) << 6) | (b4 >= 0 ? b4 : 0);
-
-    bytes.push((n >> 16) & 0xff);
-    if (b3 >= 0) bytes.push((n >> 8) & 0xff);
-    if (b4 >= 0) bytes.push(n & 0xff);
-  }
-  return new Uint8Array(bytes);
+  return Uint8Array.from(globalThis.atob(base64), (char) => char.charCodeAt(0));
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof globalThis.btoa === "function") {
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i] ?? 0);
-    }
-    return globalThis.btoa(binary);
-  }
-
-  // Fallback
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  let base64 = "";
-  const len = bytes.length;
-
-  for (let i = 0; i < len; i += 3) {
-    const byte1 = bytes[i] ?? 0;
-    const byte2 = i + 1 < len ? (bytes[i + 1] ?? 0) : 0;
-    const byte3 = i + 2 < len ? (bytes[i + 2] ?? 0) : 0;
-
-    const n = (byte1 << 16) | (byte2 << 8) | byte3;
-
-    base64 += chars.charAt((n >> 18) & 63);
-    base64 += chars.charAt((n >> 12) & 63);
-    base64 += i + 1 < len ? chars.charAt((n >> 6) & 63) : "=";
-    base64 += i + 2 < len ? chars.charAt(n & 63) : "=";
-  }
-  return base64;
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return globalThis.btoa(binary);
 }
 
 /**
@@ -256,6 +198,7 @@ function parseDerPublicKey(der: Uint8Array): RsaPublicKey {
   // Read exponent (INTEGER 0x02)
   readTag(0x02);
   const eLen = readLength();
+  if (eLen === 0 || pos + eLen !== der.length) throw new Error("Invalid DER exponent length");
   let eBytes = der.subarray(pos, pos + eLen);
   pos += eLen;
   if (eBytes[0] === 0x00) {

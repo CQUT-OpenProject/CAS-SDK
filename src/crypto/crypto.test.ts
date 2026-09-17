@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
-import { createPrivateKey, generateKeyPairSync } from "node:crypto";
+import { constants, privateDecrypt, generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 import {
-  base64ToBytes,
-  bigIntToBytes,
-  bytesToBigInt,
   DEFAULT_CQUT_PUBLIC_KEY_PEM,
   getSecretParam,
-  modPow,
   parseRsaPublicKey,
   rsaEncryptPkcs1,
 } from "./index.js";
@@ -19,7 +15,7 @@ test("parseRsaPublicKey parses 1024-bit CQUT public key correctly", () => {
   assert.ok(parsed.n > 0n);
 });
 
-test("rsaEncryptPkcs1 encrypts data decryptable with private key modulus and exponent", () => {
+test("rsaEncryptPkcs1 produces a block independently decrypted by Node crypto", () => {
   const { publicKey, privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 1024,
     publicKeyEncoding: { type: "spki", format: "pem" },
@@ -32,24 +28,17 @@ test("rsaEncryptPkcs1 encrypts data decryptable with private key modulus and exp
   const ciphertextBytes = rsaEncryptPkcs1(plaintext, parsedKey);
   assert.equal(ciphertextBytes.length, 128);
 
-  // Extract JWK parameters (n, d) from privateKey for mathematical verification
-  const keyObj = createPrivateKey(privateKey);
-  const jwk = keyObj.export({ format: "jwk" });
-  assert.ok(jwk.n && jwk.d);
-
-  const n = bytesToBigInt(base64ToBytes(jwk.n.replace(/-/g, "+").replace(/_/g, "/")));
-  const d = bytesToBigInt(base64ToBytes(jwk.d.replace(/-/g, "+").replace(/_/g, "/")));
-
-  // Mathematical decryption: m = c^d mod n
-  const c = bytesToBigInt(ciphertextBytes);
-  const m = modPow(c, d, n);
-  const decryptedBlock = bigIntToBytes(m, 128);
+  const decryptedBlock = privateDecrypt(
+    { key: privateKey, padding: constants.RSA_NO_PADDING },
+    ciphertextBytes,
+  );
 
   // Verify PKCS#1 v1.5 block format: 0x00 || 0x02 || [PS non-zero] || 0x00 || [plaintext]
   assert.equal(decryptedBlock[0], 0x00);
   assert.equal(decryptedBlock[1], 0x02);
   const zeroIndex = decryptedBlock.indexOf(0x00, 2);
-  assert.ok(zeroIndex > 2);
+  assert.ok(zeroIndex >= 10);
+  assert.ok(decryptedBlock.subarray(2, zeroIndex).every((byte) => byte !== 0));
   const extractedPlaintext = new TextDecoder().decode(decryptedBlock.subarray(zeroIndex + 1));
   assert.equal(extractedPlaintext, plaintext);
 });
@@ -82,4 +71,17 @@ test("getSecretParam splits long passwords into 30-char encrypted chunks correct
 test("getSecretParam returns empty string for empty password", () => {
   assert.equal(getSecretParam(""), "");
   assert.equal(getSecretParam("   "), "");
+});
+
+test("encryption rejects missing secure randomness", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto")!;
+  try {
+    Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true });
+    assert.throws(() => getSecretParam("password"), { kind: "CONFIGURATION_ERROR" });
+  } finally {
+    Object.defineProperty(globalThis, "crypto", descriptor);
+  }
+});
+test("invalid public key is a crypto error", () => {
+  assert.throws(() => getSecretParam("password", "invalid key"), { kind: "CRYPTO_ERROR" });
 });
