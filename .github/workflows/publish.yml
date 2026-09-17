@@ -1,85 +1,69 @@
 name: Publish SDK
-
 on:
   push:
     branches: [master]
-    tags: ["release-*", "release/*", "v*"]
+    tags: ["release-*"]
   workflow_dispatch:
-
 permissions:
   contents: write
   packages: write
-
 concurrency:
-  group: publish-${{ github.ref }}
-  cancel-in-progress: true
-
+  group: publish-sdk
+  cancel-in-progress: false
 jobs:
   ci:
-    name: CI gate
     uses: ./.github/workflows/ci.yml
-
   publish:
-    name: Build and Publish SDK
     needs: [ci]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 10.32.1
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: "https://npm.pkg.github.com"
           scope: "@cqut-openproject"
           cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build SDK
-        run: pnpm run build
-
-      - name: Run unit tests
-        run: pnpm run test
-
-      - name: Publish to GitHub Packages
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Prepare release artifact and validate version
+        env:
+          SOURCE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
-          pnpm publish --no-git-checks || echo "Skipping package publish or already exists"
+          ARTIFACT_DIR=$(mktemp -d)
+          VERSION_TAG=$(node scripts/prepare-release.mjs "$ARTIFACT_DIR" "$SOURCE_TAG")
+          echo "ARTIFACT_DIR=$ARTIFACT_DIR" >> "$GITHUB_ENV"
+          echo "VERSION_TAG=$VERSION_TAG" >> "$GITHUB_ENV"
+          if [ -n "$SOURCE_TAG" ]; then
+            REMOTE_TAG=$(git ls-remote --tags origin "refs/tags/$VERSION_TAG")
+            if [ -n "$REMOTE_TAG" ]; then
+              echo "Artifact version tag already exists"
+              exit 1
+            fi
+          fi
+      - name: Publish versioned package
+        if: startsWith(github.ref, 'refs/tags/release-')
+        run: pnpm publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push pre-built SDK to release branch
+      - name: Push installable artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/release-') }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          COMMIT_SHA="${GITHUB_SHA::7}"
-          WORKDIR=$(mktemp -d)
-
-          cp -r dist "$WORKDIR/dist"
-          cp package.json "$WORKDIR/package.json"
-          cp README.md "$WORKDIR/README.md"
-          [ -f LICENSE ] && cp LICENSE "$WORKDIR/LICENSE"
-
-          cd "$WORKDIR"
-          git init
+          cd "$ARTIFACT_DIR"
+          git init -b release
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b release
-          git add -f dist package.json README.md LICENSE
-          git commit -m "🚀 发布 v${VERSION} (${COMMIT_SHA})"
-          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          git push origin release --force
-
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            RAW_TAG="${{ github.ref_name }}"
-            CLEAN_TAG="${RAW_TAG#release/}"
-            CLEAN_TAG="${CLEAN_TAG#release-}"
-            CLEAN_TAG="${CLEAN_TAG#v}"
-
-            git tag -f "$CLEAN_TAG"
-            git push origin "$CLEAN_TAG" --force
+          git add .
+          git commit -m "🚀 发布 SDK 构建产物"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if [ "$IS_RELEASE" = "true" ]; then
+            git tag "$VERSION_TAG"
+            git push origin "refs/tags/$VERSION_TAG"
+          else
+            git push origin release --force
           fi

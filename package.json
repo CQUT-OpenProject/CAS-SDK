@@ -1,6 +1,6 @@
 {
   "name": "@cqut-openproject/cas-sdk",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Cross-runtime, zero-dependency CQUT UIS / CAS authentication TypeScript & JavaScript SDK",
   "keywords": [
     "cqut",
@@ -20,14 +20,24 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./crypto": {
-      "types": "./dist/crypto/index.d.ts",
-      "import": "./dist/crypto/index.js",
-      "require": "./dist/crypto/index.cjs"
+      "import": {
+        "types": "./dist/crypto/index.d.ts",
+        "default": "./dist/crypto/index.js"
+      },
+      "require": {
+        "types": "./dist/crypto/index.d.cts",
+        "default": "./dist/crypto/index.cjs"
+      }
     }
   },
   "license": "MIT",
@@ -48,11 +58,13 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup && tsc --emitDeclarationOnly",
+    "build": "tsup && tsc -p tsconfig.build.json --emitDeclarationOnly && node scripts/cjs-declarations.mjs",
     "dev": "tsup --watch",
     "lint": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "check:package": "node scripts/check-package.mjs",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
@@ -62,6 +74,6 @@
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   }
 }

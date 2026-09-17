@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20, 22, 24]
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
@@ -42,3 +42,9 @@ jobs:
 
       - name: Run unit tests
         run: pnpm run test
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Test package and Git artifact consumers
+        run: pnpm check:package
