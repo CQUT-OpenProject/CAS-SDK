@@ -2,7 +2,7 @@ import "../polyfill.js";
 import type { Cookie, ICookieJar } from "./types.js";
 
 /**
- * Lightweight, zero-dependency in-memory Cookie Jar conforming to RFC 6265 basics.
+ * Lightweight, zero-dependency in-memory Cookie Jar for server-side authentication sessions.
  * Implements Disposable for explicit resource cleanup via `using jar = new MemoryCookieJar()`.
  */
 export class MemoryCookieJar implements ICookieJar, Disposable {
@@ -58,7 +58,7 @@ export class MemoryCookieJar implements ICookieJar, Disposable {
 
     return this.cookies.filter((c) => {
       if (c.secure && !isSecure) return false;
-      if (!matchDomain(c.domain, hostname)) return false;
+      if (c.hostOnly ? c.domain !== hostname : !matchDomain(c.domain, hostname)) return false;
       if (!matchPath(c.path, pathname)) return false;
       return true;
     });
@@ -90,6 +90,7 @@ function parseSetCookie(raw: string, defaultHost: string, defaultPath: string): 
   const value = firstPart.slice(equalIdx + 1).trim();
 
   let domain = defaultHost.toLowerCase();
+  let hostOnly = true;
   let path = defaultPath.startsWith("/") ? defaultPath : "/";
   // Default path in RFC 6265: directory of pathname
   const lastSlash = path.lastIndexOf("/");
@@ -114,6 +115,8 @@ function parseSetCookie(raw: string, defaultHost: string, defaultPath: string): 
 
     if (key === "domain" && val) {
       domain = val.startsWith(".") ? val.slice(1).toLowerCase() : val.toLowerCase();
+      hostOnly = false;
+      if (!matchDomain(domain, defaultHost)) return null;
     } else if (key === "path" && val) {
       path = val;
     } else if (key === "expires" && val) {
@@ -134,6 +137,7 @@ function parseSetCookie(raw: string, defaultHost: string, defaultPath: string): 
   }
 
   return {
+    hostOnly,
     name,
     value,
     domain,
@@ -149,10 +153,10 @@ function parseSetCookie(raw: string, defaultHost: string, defaultPath: string): 
 function isExpired(cookie: Cookie, now = Date.now()): boolean {
   if (cookie.maxAge !== undefined) {
     if (cookie.maxAge <= 0) return true;
-    return now > cookie.createdAt + cookie.maxAge * 1000;
+    return now >= cookie.createdAt + cookie.maxAge * 1000;
   }
   if (cookie.expires !== undefined) {
-    return now > cookie.expires.getTime();
+    return now >= cookie.expires.getTime();
   }
   return false;
 }
