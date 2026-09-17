@@ -2,7 +2,7 @@
 
 <div align="center">
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-7+-3178c6.svg?style=flat" alt="TypeScript 7+"></a>
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-18+-green.svg?style=flat" alt="Node.js 18+"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22+-green.svg?style=flat" alt="Node.js 22+"></a>
   <a href="https://pnpm.io/"><img src="https://img.shields.io/badge/pnpm-10+-orange.svg?style=flat" alt="pnpm 10+"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat" alt="License: MIT"></a>
 </div>
@@ -15,24 +15,24 @@
 
 ## 主要特性
 
-- **「跨运行时」**：原生兼容 Node.js (>= 18)、Cloudflare Workers (Edge)、AWS Lambda / Vercel (Serverless)、Bun 与现代浏览器环境
-- **「零外部依赖」**：纯 TypeScript 原生 `BigInt` 实现 RSA PKCS#1 v1.5 加密与 XML 验证解析，产物体积极小（< 10 KB）
+- **「跨运行时」**：完整认证已验证 Node.js (>= 22)；Edge、Bun 尚待验证，现代浏览器仅支持独立加密
+- **「零外部依赖」**：纯 TypeScript 原生 `BigInt` 实现 RSA PKCS#1 v1.5 加密与 XML 验证解析
 - **「网络层解耦」**：采用控制反转（IoC）架构，支持按需注入 Node `fetch`、`undici`、`axios` 或自定义代理实例
 - **「双层 API」**：提供开箱即用的一站式 `login` / `safeLogin` 流转方法与精细化的分步原子 API
-- **「生产级防御」**：内置防 XXE、防 Doctype 实体注入、64KB 响应体积上限防御与网络瞬态自动重试
+- **「协议校验」**：拒绝 DTD / 自定义实体，严格校验 CAS XML 结构，JSON / XML 流读取上限 64 KiB；仅初始化 GET 对网络错误或 5xx 重试一次
 
 ## 安装
 
 ### 方式一：通过 Git Release 分支 / Tag 安装（推荐，无需 Token / 免配置）
 
-仓库内置 CI 会在发版与更新时自动将包含编译产物（`dist/`）的版本同步至 `release` 分支与 `v*` Tag。下游项目无需配置任何 Token 或 `.npmrc`，可直接安装：
+仓库内置 CI 会将 `master` 的编译产物（`dist/`）同步至 `release` 分支；源码标签 `release-X.Y.Z` 发版后生成不可变的产物标签 `vX.Y.Z`。下游项目无需配置任何 Token 或 `.npmrc`，可直接安装：
 
 ```bash
 # 持续跟随最新稳定构建
 pnpm add github:CQUT-OpenProject/CAS-SDK#release
 
-# 或锁定具体版本 Tag（例如 v1.0.0）
-pnpm add github:CQUT-OpenProject/CAS-SDK#v1.0.0
+# 或锁定具体版本 Tag（v2.0.0 发布后可用）
+pnpm add github:CQUT-OpenProject/CAS-SDK#v2.0.0
 # 或使用 npm / yarn
 npm install github:CQUT-OpenProject/CAS-SDK#release
 ```
@@ -60,25 +60,27 @@ npm install @cqut-openproject/cas-sdk
 ```ts
 import { createCasClient } from "@cqut-openproject/cas-sdk";
 
-await using client = createCasClient();
+const client = createCasClient();
 
-const result = await client.login({
+using result = await client.login({
   account: "2021123456",
   password: "YourPasswordHere",
   serviceUrl: "https://example.cqut.edu.cn/auth/callback",
-  validate: true, // 可选：获取 Ticket 后自动完成服务端验证
 });
 
-console.log("Service Ticket:", result.ticket);
-console.log("Verified User:", result.validation?.user);
+// 将 result.ticket 交给目标服务兑换，避免输出到日志。
 ```
+
+如需验证身份，传入 `validate: true`，通过 `result.validation.user` 获取用户；该结果不再包含已用于验证的 Ticket。
+
+登录结果持有会话，使用 `using` 或在 `finally` 中调用 `result.dispose()` 清理本地 Cookie；client 无需释放。默认登录总时限为 30 秒，可设置 `timeoutMs` 或传入 `signal`。
 
 ### 2. 函数式 Result 模式安全登录
 
 ```ts
 import { createCasClient, isCasErrorOfKind } from "@cqut-openproject/cas-sdk";
 
-await using client = createCasClient();
+const client = createCasClient();
 
 const result = await client.safeLogin({
   account: "2021123456",
@@ -87,7 +89,8 @@ const result = await client.safeLogin({
 });
 
 if (result.ok) {
-  console.log("Service Ticket:", result.data.ticket);
+  using session = result.data;
+  // 使用 session.ticket；离开作用域时释放本地会话。
 } else {
   if (isCasErrorOfKind(result.error, "AUTH_FAILED")) {
     console.error("账号或密码错误");
@@ -97,7 +100,11 @@ if (result.ok) {
 }
 ```
 
+`safeLogin` 仅将已知 `CasError` 转为 Result，未知程序异常仍会抛出。高层登录支持 `verifyCode`、`universityId` 和 `loginType`；需要定制存储时使用每次返回独立实例的 `cookieJarFactory`。分步会话方法要求显式传入 `{ cookieJar }`，由调用者清理。
+
 ### 3. 注入自定义网络实现 (Fetcher)
+
+Fetcher 必须支持 `signal`，只返回单次请求的响应，不自动跟随重定向，并保留独立的 Set-Cookie 值。
 
 #### Node.js / Undici（绑定 Dispatcher 强制 IPv4）
 
@@ -133,6 +140,7 @@ const client = new CasClient({
 ```ts
 import { CasClient } from "@cqut-openproject/cas-sdk";
 import axios from "axios";
+import { Readable } from "node:stream";
 
 const client = new CasClient({
   fetcher: async (req) => {
@@ -141,17 +149,17 @@ const client = new CasClient({
       method: req.method,
       headers: req.headers,
       data: req.body,
-      maxRedirects: req.redirect === "manual" ? 0 : 5,
+      signal: req.signal,
+      maxRedirects: 0,
       validateStatus: () => true,
-      responseType: "text",
+      responseType: "stream",
     });
 
     return {
       status: res.status,
-      statusText: res.statusText,
-      headers: res.headers as Record<string, string | string[]>,
-      text: async () => (typeof res.data === "string" ? res.data : JSON.stringify(res.data)),
-      json: async () => (typeof res.data === "string" ? JSON.parse(res.data) : res.data),
+      headers: res.headers as Record<string, string | string[] | undefined>,
+      url: req.url,
+      body: Readable.toWeb(res.data) as ReadableStream<Uint8Array>,
     };
   },
 });
@@ -160,17 +168,15 @@ const client = new CasClient({
 ### 4. 原子 API：密码加密
 
 ```ts
-import { CasClient, getSecretParam } from "@cqut-openproject/cas-sdk";
+import { getSecretParam } from "@cqut-openproject/cas-sdk/crypto";
 
 // 独立密码加密
-const secretParam = CasClient.encryptPassword("MyPassword123");
-// 或直接调用函数
-const encoded = getSecretParam("MyPassword123");
+const secretParam = getSecretParam("MyPassword123");
 ```
 
 ## 错误处理
 
-SDK 统一抛出强类型 `CasError`，可通过 `isCasErrorOfKind` 或 `error.kind` 进行分类处理：
+SDK 的已知认证与运行时错误使用强类型 `CasError`，可通过 `isCasErrorOfKind` 或 `error.kind` 进行分类处理：
 
 ```ts
 import { CasClient, CasError, isCasErrorOfKind } from "@cqut-openproject/cas-sdk";
@@ -183,7 +189,11 @@ try {
   } else if (isCasErrorOfKind(err, "CAPTCHA_REQUIRED")) {
     console.error("触发验证码校验");
   } else if (isCasErrorOfKind(err, "NETWORK_ERROR")) {
-    console.error("网络瞬态错误或连接超时");
+    console.error("网络连接或响应读取失败");
+  } else if (isCasErrorOfKind(err, "TIMEOUT")) {
+    console.error("认证超时");
+  } else if (isCasErrorOfKind(err, "ABORTED")) {
+    console.error("认证已取消");
   } else if (isCasErrorOfKind(err, "UPSTREAM_ERROR")) {
     console.error("UIS 服务端异常 (500/502/503)");
   } else if (isCasErrorOfKind(err, "VALIDATION_FAILED")) {
@@ -191,6 +201,8 @@ try {
   }
 }
 ```
+
+缺少安全随机源或配置无效时返回 `CONFIGURATION_ERROR`，密钥或加密输入无效时返回 `CRYPTO_ERROR`。
 
 ## 许可证
 
