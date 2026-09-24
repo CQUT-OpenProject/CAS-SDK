@@ -1,52 +1,37 @@
-## Quick Overview
+# CAS-SDK 协作说明
 
-CAS-SDK (`@cqut-openproject/cas-sdk`) is a zero-dependency, cross-runtime TypeScript client SDK for CQUT UIS / CAS authentication, verified on Node.js 22/24. Browser support is limited to independent crypto; Edge/Bun authentication is unverified.
+CAS-SDK（`@cqut-openproject/cas-sdk`）是用于 CQUT UIS / CAS 认证的 TypeScript 客户端，提供 ESM 与 CommonJS 构建。生产代码零外部依赖；认证流程已在 Node.js 22 和 24 验证。浏览器支持仅覆盖独立加密模块，Edge 与 Bun 的完整认证尚未验证。
 
-- **Stack**: Node.js 22+, TypeScript 7+ (ESM + CJS, strict, `verbatimModuleSyntax`, `erasableSyntaxOnly`), `tsup`, `tsx`
-- **Package Manager**: `pnpm` (10+)
-- **Structure**:
-  - `src/client/`: High-level CAS client (`cas-client.ts`), endpoint resolvers (`endpoints.ts`), branded types & result types (`types.ts`)
-  - `src/cookie/`: RFC 6265 disposable in-memory cookie jar (`cookie-jar.ts`)
-  - `src/crypto/`: Zero-dependency RSA PKCS#1 v1.5 with native `BigInt` (`rsa.ts`), password chunk encryptor (`encryptor.ts`)
-  - `src/errors/`: Strongly-typed `CasError` and type guards (`cas-error.ts`)
-  - `src/http/`: IoC fetcher abstraction & Web Standard Fetch adapter (`default-fetcher.ts`)
-  - `src/parser/`: Strict CAS XML subset parser (no DTD/custom entities) (`cas-xml.ts`)
-  - `src/polyfill.ts`: Polyfill for `Symbol.dispose` and `Symbol.asyncDispose`
-  - `src/index.ts`: Unified SDK exports
-  - `src/**/*.test.ts`: Modular unit tests located near source
-  - `.github/workflows/`: CI testing (`ci.yml`) and package/release distribution (`publish.yml`)
+## 开发环境与命令
 
-## Commands & Workflow
+- 使用 Node.js 22+、pnpm 10+；TypeScript 配置要求 strict、`verbatimModuleSyntax` 与 `erasableSyntaxOnly`。
+- `pnpm install` 安装依赖；`pnpm dev` 以 watch 模式构建。
+- `pnpm test` 运行单元测试；运行单个文件：`pnpm exec tsx --test <测试文件>`。
+- `pnpm lint` 执行 TypeScript 类型检查；`pnpm build` 生成 ESM / CJS 与类型声明。
+- 发布包检查使用 `pnpm check:package`；格式检查使用 `pnpm format:check`。
 
-- `pnpm install`: Install dependencies
-- `pnpm dev`: Start build in watch mode (`tsup --watch`)
-- `pnpm test`: Run all unit tests via Node test runner (`tsx --test src/**/*.test.ts`); run a single test: `npx tsx --test <path-to-test.ts>`
-- `pnpm lint`: Run TypeScript type check (`tsc --noEmit`)
-- `pnpm build`: Build dual ESM/CJS bundles and emit `.d.ts` / `.d.cts` declaration graphs (`dist/`)
-- `pnpm format`: Format codebase with Prettier
+## 按任务查阅
 
-## Write Code
+- 客户端与端点：`src/client/`；Cookie：`src/cookie/`；RSA 与密码加密：`src/crypto/`；错误：`src/errors/`；HTTP：`src/http/`；CAS XML：`src/parser/`。
+- 改动认证、Cookie、加密或 XML 行为时，先查看对应实现和相邻测试，并补充覆盖新行为的回归测试。
+- 发布流程与标签约定见 `.github/workflows/publish.yml` 及相关 `scripts/`；仅在处理发布时查阅。
 
-- Plan first; do NOT rush to code.
-- Zero external production dependencies: SDK runtime logic must rely purely on standard ECMAScript / TypeScript.
-- Strict TypeScript 7+ & ES Modules with 2-space indentation.
-- Adhere to `erasableSyntaxOnly` (no `enum`, no parameter properties, no runtime `namespace`) for 100% Type Stripping compliance.
-- Keep domain logic isolated in its corresponding module (`client/`, `cookie/`, `crypto/`, `errors/`, `http/`, `parser/`).
-- Login results own session jars and implement `Disposable`; the client holds configuration only. Cleanup releases local references, not remote sessions or guaranteed memory erasure.
-- Never commit build artifacts (`dist/`).
-- Add regression tests for changes touching auth flows, XML parsing, crypto, or cookie management. All tests must pass locally before completing tasks.
+## 实现约束
 
-## Response Format
+- 运行时实现只使用 ECMAScript / TypeScript 标准能力，不增加生产依赖。
+- 遵循 TypeScript 的 `erasableSyntaxOnly`：不用 `enum`、参数属性或运行时 `namespace`；缩进使用两个空格。
+- 认证提交与 ticket 操作不得重试；HTTP 适配器保持单跳并流式返回响应。
+- 登录结果拥有各自的会话 Cookie jar，并实现 `Disposable`；客户端只保存配置。清理只释放本地引用，不代表远端会话失效或内存已被可靠擦除。
+- 测试数据只能使用合成重建的 fixture；不得在源码或 CI 中保存真实凭据、Cookie 或 ticket。
+- 不提交 `dist/` 构建产物。
 
-Be concise. Do not write unsolicited "WHY" explanations.
+## 验证与发布
 
-## Commit Convention
+根据改动选择验证：通常运行 `pnpm lint` 与相关测试；构建、格式或包内容变更时，再运行对应的 `pnpm build`、`pnpm format:check` 或 `pnpm check:package`。报告实际运行的命令及未运行的检查。
 
-Use Gitmoji format: `<emoji> <concise Chinese>` (no `feat:`/`fix:` prefix). e.g., `✨ 新增 Result 模式安全登录` or `🐛 修复 XML 标签解析边界`.
+- 发布源标签格式为 `release-X.Y.Z`，安装产物使用不可变标签 `vX.Y.Z`。
+- 不覆盖已有版本标签，也不隐藏发布失败。
 
-## Validation and publishing
+## 提交信息
 
-- Run `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm check:package`, and `git diff --check`.
-- The HTTP adapter returns a single-hop streamed response; credential submission and ticket operations are never retried.
-- Fixtures are synthetic reconstructions. Never store credentials, cookies, or real tickets in source or CI.
-- Source tags use `release-X.Y.Z`; installable artifacts use immutable `vX.Y.Z`. Do not overwrite version tags or suppress publishing failures.
+使用 Gitmoji 加简洁中文描述，例如：`✨ 新增 Result 模式安全登录`、`🐛 修复 XML 标签解析边界`。
