@@ -4,11 +4,12 @@ CAS-SDK（`@cqut-openproject/cas-sdk`）是用于 CQUT UIS / CAS 认证的 TypeS
 
 ## 开发环境与命令
 
-- 使用 Node.js 22+、pnpm 10+；TypeScript 配置要求 strict、`verbatimModuleSyntax` 与 `erasableSyntaxOnly`。
-- `pnpm install` 安装依赖；`pnpm dev` 以 watch 模式构建。
-- `pnpm test` 运行单元测试；运行单个文件：`pnpm exec tsx --test <测试文件>`。
-- `pnpm lint` 执行 TypeScript 类型检查；`pnpm build` 生成 ESM / CJS 与类型声明。
-- 发布包检查使用 `pnpm check:package`；格式检查使用 `pnpm format:check`。
+- 本项目使用 [Vite+](https://viteplus.dev) 统一管理开发工具链，请勿使用其它工具进行管理。
+- 使用 `.node-version` 固定的 Node.js 24.21.0、Vite+（`vp`）与项目锁定的 pnpm 10；用 `vp env current` 检查实际解析结果。TypeScript 配置要求 strict、`verbatimModuleSyntax` 与 `erasableSyntaxOnly`。
+- `vp install` 安装依赖；`vp run dev` 以 watch 模式构建。
+- `vp test` 运行单元测试；运行单个文件：`vp test src/crypto/crypto.test.ts`。
+- `vp lint` 执行 Oxlint、类型感知 lint 与 TypeScript 类型检查；`vp run build` 生成 ESM / CJS 与类型声明。
+- 发布包检查使用 `vp run check:package`；格式检查使用 `vp fmt --check`。
 
 ## 按任务查阅
 
@@ -27,7 +28,7 @@ CAS-SDK（`@cqut-openproject/cas-sdk`）是用于 CQUT UIS / CAS 认证的 TypeS
 
 ## 验证与发布
 
-根据改动选择验证：通常运行 `pnpm lint` 与相关测试；构建、格式或包内容变更时，再运行对应的 `pnpm build`、`pnpm format:check` 或 `pnpm check:package`。报告实际运行的命令及未运行的检查。
+根据改动选择验证：通常运行 `vp check` 与相关测试；构建或包内容变更时，再运行 `vp run build` 或 `vp run check:package`。报告实际运行的命令及未运行的检查。
 
 - 发布源标签格式为 `release-X.Y.Z`，安装产物使用不可变标签 `vX.Y.Z`。
 - 不覆盖已有版本标签，也不隐藏发布失败。

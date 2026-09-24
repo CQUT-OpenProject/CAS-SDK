@@ -204,6 +204,26 @@ try {
 
 缺少安全随机源或配置无效时返回 `CONFIGURATION_ERROR`，密钥或加密输入无效时返回 `CRYPTO_ERROR`。
 
+## 开发
+
+本项目使用 [Vite+](https://viteplus.dev) 统一管理开发工具链，请勿使用其它工具进行管理。
+
+仓库使用 Vite+ 统一管理 Node.js、pnpm、构建、测试、lint 和格式化。`.node-version` 固定日常开发使用的 Node.js 版本；`engines.node` 表示 SDK 对下游运行时的支持范围，两者用途不同。
+
+```bash
+vp env current       # 查看当前项目解析出的 Node.js 与 pnpm
+vp env install       # 安装 .node-version 与 packageManager 声明的环境
+vp install           # 按锁文件安装依赖
+vp check             # Oxfmt、Oxlint 与 TypeScript 检查
+vp test              # 运行全部 Vitest 测试
+vp run build         # 生成 ESM、CommonJS 与类型声明
+vp run check:package # 验证 tarball、分支和标签消费方式
+```
+
+运行单个测试文件可使用 `vp test src/crypto/crypto.test.ts`。提交前执行 `vp run verify`；首次 clone 后如需启用仓库自带的 staged 检查，运行 `vp hooks enable`。
+
+构建输出位于 `dist/`，不得提交。Node.js 22 与 24 的兼容性由 CI 矩阵验证；升级开发版本时应修改 `.node-version` 并保持该矩阵通过。
+
 ## 许可证
 
 本项目基于 [MIT](./LICENSE) 协议开源。
