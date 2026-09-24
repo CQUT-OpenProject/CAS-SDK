@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import test from "node:test";
+import { test } from "vite-plus/test";
 import { CasClient, createCasClient } from "./cas-client.js";
-import { assertServiceTicket, isServiceTicket } from "./types.js";
-import { CasError, isCasError, isCasErrorOfKind } from "../errors/cas-error.js";
+import { isCasError, isCasErrorOfKind } from "../errors/cas-error.js";
 
 const APP_CODE = "officeHallApplicationCode";
 const TEST_ACCOUNT = "test-account-sdk";

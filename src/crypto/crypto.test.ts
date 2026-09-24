@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { constants, privateDecrypt, generateKeyPairSync } from "node:crypto";
-import test from "node:test";
+import { test } from "vite-plus/test";
 import {
   DEFAULT_CQUT_PUBLIC_KEY_PEM,
   getSecretParam,

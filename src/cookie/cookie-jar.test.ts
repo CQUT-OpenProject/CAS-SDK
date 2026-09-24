@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 import { MemoryCookieJar } from "./index.js";
 
 test("MemoryCookieJar stores and retrieves cookies for matching domain and path", () => {

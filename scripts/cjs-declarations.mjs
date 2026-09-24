@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-// TS 7 emits declarations; tsup's declaration bundler still expects the old TS JS API.
+// TS 7 emits declarations; convert their extensions for the CommonJS export branch.
 // Mirror the declaration graph with CJS extensions so NodeNext resolves both entrypoints.
 async function mirror(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
