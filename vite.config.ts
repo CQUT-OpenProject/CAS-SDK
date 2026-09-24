@@ -23,7 +23,10 @@ export default defineConfig({
   fmt: {
     semi: true,
     singleQuote: false,
+    useTabs: false,
     tabWidth: 2,
+    endOfLine: "lf",
+    insertFinalNewline: true,
     trailingComma: "all",
     printWidth: 100,
     sortPackageJson: false,
