@@ -11,7 +11,7 @@
 > `@cqut-openproject/cas-sdk` 是面向 TypeScript 与 JavaScript 跨运行时生态的重庆理工大学统一身份认证（UIS / CAS）客户端 SDK，提供跨运行时、零外部强依赖、强类型的认证流转、密码加密与票据验证能力。
 
 > [!CAUTION]
-> 本 SDK 在登录期间需使用学校账号与密码请求 UIS 服务端。凭据仅在客户端内存流转，请严格遵循密码学安全与隐私合规要求，切勿在不安全的日志中打印明文凭据。
+> 登录时，SDK 会用学校账号和密码请求 UIS。SDK 不会持久化凭据。请勿将明文凭据写入日志。
 
 ## 主要特性
 
@@ -23,23 +23,24 @@
 
 ## 安装
 
-### 方式一：通过 Git Release 分支 / Tag 安装（推荐，无需 Token / 免配置）
+### 方式一：从 GitHub 安装
 
-仓库内置 CI 会将 `master` 的编译产物（`dist/`）同步至 `release` 分支；源码标签 `release-X.Y.Z` 发版后生成不可变的产物标签 `vX.Y.Z`。下游项目无需配置任何 Token 或 `.npmrc`，可直接安装：
+GitHub Actions 会将编译产物发布到 `release` 分支。每个源码版本也会生成一个不可变的 `vX.Y.Z` 产物标签。
 
 ```bash
-# 持续跟随最新稳定构建
+# 安装 release 分支的最新构建
 pnpm add github:CQUT-OpenProject/CAS-SDK#release
 
-# 或锁定具体版本 Tag（v2.0.0 发布后可用）
+# 或锁定具体版本
 pnpm add github:CQUT-OpenProject/CAS-SDK#v2.0.0
-# 或使用 npm / yarn
+
+# npm 和 yarn 也支持 GitHub 地址
 npm install github:CQUT-OpenProject/CAS-SDK#release
 ```
 
 ### 方式二：通过 GitHub Packages 安装
 
-如需通过 npm 官方包名格式引入，请在项目根目录或全局 `~/.npmrc` 中配置：
+通过 GitHub Packages 安装时，先在项目 `.npmrc` 或用户级 `~/.npmrc` 中配置：
 
 ```ini
 @cqut-openproject:registry=https://npm.pkg.github.com
@@ -63,17 +64,17 @@ import { createCasClient } from "@cqut-openproject/cas-sdk";
 const client = createCasClient();
 
 using result = await client.login({
-  account: "2021123456",
-  password: "YourPasswordHere",
-  serviceUrl: "https://example.cqut.edu.cn/auth/callback",
+  account: "<student-id>",
+  password: "<password>",
+  serviceUrl: "https://service.example.com/callback",
 });
 
 // 将 result.ticket 交给目标服务兑换，避免输出到日志。
 ```
 
-如需验证身份，传入 `validate: true`，通过 `result.validation.user` 获取用户；该结果不再包含已用于验证的 Ticket。
+如需验证身份，传入 `validate: true`，再从 `result.validation.user` 读取用户信息。验证成功的结果不包含已兑换的 Ticket。
 
-登录结果持有会话，使用 `using` 或在 `finally` 中调用 `result.dispose()` 清理本地 Cookie；client 无需释放。默认登录总时限为 30 秒，可设置 `timeoutMs` 或传入 `signal`。
+登录结果持有独立 Cookie 会话。使用 `using` 或在 `finally` 中调用 `result.dispose()` 清理本地 Cookie；无需释放 client。默认登录时限为 30 秒，可通过 `timeoutMs` 或 `signal` 调整。
 
 ### 2. 函数式 Result 模式安全登录
 
@@ -83,9 +84,9 @@ import { createCasClient, isCasErrorOfKind } from "@cqut-openproject/cas-sdk";
 const client = createCasClient();
 
 const result = await client.safeLogin({
-  account: "2021123456",
-  password: "YourPasswordHere",
-  serviceUrl: "https://example.cqut.edu.cn/auth/callback",
+  account: "<student-id>",
+  password: "<password>",
+  serviceUrl: "https://service.example.com/callback",
 });
 
 if (result.ok) {
@@ -100,11 +101,11 @@ if (result.ok) {
 }
 ```
 
-`safeLogin` 仅将已知 `CasError` 转为 Result，未知程序异常仍会抛出。高层登录支持 `verifyCode`、`universityId` 和 `loginType`；需要定制存储时使用每次返回独立实例的 `cookieJarFactory`。分步会话方法要求显式传入 `{ cookieJar }`，由调用者清理。
+`safeLogin` 会把已知 `CasError` 转成 Result。未知程序异常仍会抛出。登录还支持 `verifyCode`、`universityId` 和 `loginType`。定制 Cookie 存储时，可配置每次登录都创建独立实例的 `cookieJarFactory`。分步会话方法要求调用者传入 `{ cookieJar }` 并负责清理。
 
-### 3. 注入自定义网络实现 (Fetcher)
+### 3. 注入自定义网络实现（Fetcher）
 
-Fetcher 必须支持 `signal`，只返回单次请求的响应，不自动跟随重定向，并保留独立的 Set-Cookie 值。
+自定义 Fetcher 必须支持 `signal`，并返回单次请求的响应。它不能自动跟随重定向，也要保留每个独立的 `Set-Cookie` 值。
 
 #### Node.js / Undici（绑定 Dispatcher 强制 IPv4）
 
