@@ -1,0 +1,64 @@
+{
+  "name": "@cqut-openproject/cas-sdk",
+  "version": "2.0.0",
+  "description": "Cross-runtime, zero-dependency CQUT UIS / CAS authentication TypeScript & JavaScript SDK",
+  "keywords": [
+    "cqut",
+    "cas",
+    "uis",
+    "sso",
+    "auth",
+    "sdk",
+    "typescript",
+    "javascript",
+    "zero-dependency",
+    "cross-runtime"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./crypto": {
+      "import": {
+        "types": "./dist/crypto/index.d.ts",
+        "default": "./dist/crypto/index.js"
+      },
+      "require": {
+        "types": "./dist/crypto/index.d.cts",
+        "default": "./dist/crypto/index.cjs"
+      }
+    }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CQUT-OpenProject/CAS-SDK.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CQUT-OpenProject/CAS-SDK/issues"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@10.32.1"
+}
