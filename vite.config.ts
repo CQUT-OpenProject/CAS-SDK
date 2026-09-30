@@ -13,6 +13,11 @@ export default defineConfig({
     fixedExtension: false,
   },
   test: {
+    // Preserve Vitest v4 mock-call history behavior on Vitest v5.
+    // Remove after tests no longer rely on calls from setup or earlier tests.
+    // https://viteplus.dev/guide/vitest-v5#remove-unneeded-compatibility-settings
+    // https://vitest.dev/guide/migration/#clearmocks-is-enabled-by-default
+    clearMocks: false,
     include: ["src/**/*.test.ts"],
   },
   lint: {
