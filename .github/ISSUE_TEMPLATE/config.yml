@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: CAS-SDK 使用说明
+    url: https://github.com/CQUT-OpenProject/CAS-SDK#readme
+    about: 提交 Issue 前，请先查看 README 中的用法与运行时支持范围。
