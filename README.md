@@ -175,6 +175,57 @@ import { getSecretParam } from "@cqut-openproject/cas-sdk/crypto";
 const secretParam = getSecretParam("MyPassword123");
 ```
 
+### 5. 身份校验层：在自己的后端完成登录
+
+不部署完整的认证服务，只想在自己的后端用学号和密码确认用户身份时，使用 `identity` 子路径。它在 `login` 的基础上补齐了：
+
+- 账号规范化：去除首尾空格，转为小写
+- 身份一致性：核对 CAS 返回的用户与登录账号是否一致
+- 错误分类：区分密码错误、验证码、上游不可用等情况
+- 限流：按账号和来源分别限制，触发限流时不请求 UIS
+- 自动释放会话
+- 最小化返回字段：不返回姓名或内部令牌
+
+会话签发交给你使用的认证框架。
+
+```ts
+import {
+  createCampusVerifier,
+  describeCampusVerifyError,
+} from "@cqut-openproject/cas-sdk/identity";
+
+const verifier = createCampusVerifier({
+  // 可选：无需数据库即可得到稳定的假名 sub；secret 至少 32 字节
+  subject: { secret: process.env.CAMPUS_SUBJECT_SECRET!, namespace: "my-app" },
+});
+
+const result = await verifier.verify({ account, password, clientKey: request.ip });
+if (result.ok) {
+  // result.data: { schoolUid, school: "cqut", studentStatus: "active", sub? }
+} else {
+  // result.error.code / result.error.retryable
+  showError(describeCampusVerifyError(result.error));
+}
+```
+
+| `code`                 | 含义                                 | 可重试 |
+| ---------------------- | ------------------------------------ | ------ |
+| `invalid_input`        | 账号或密码为空或超长                 | 否     |
+| `invalid_credentials`  | 账号或密码错误                       | 否     |
+| `captcha_required`     | UIS 要求验证码                       | 否     |
+| `identity_mismatch`    | CAS 返回的用户与登录账号不一致       | 否     |
+| `rate_limited`         | 超过限流阈值，附带 `retryAfterMs`    | 是     |
+| `upstream_unavailable` | UIS 不可用、网络错误或超时           | 是     |
+| `protocol_error`       | UIS 响应不符合预期或 Ticket 校验失败 | 是     |
+| `aborted`              | 调用方通过 `signal` 取消             | 否     |
+
+注意事项：
+
+- `verify()` 用 Result 返回认证失败；配置错误（`CONFIGURATION_ERROR`、`CRYPTO_ERROR`）、限流器异常和未知异常会直接抛出。
+- 默认限流器 `MemoryRateLimiter` 每 15 分钟允许每个账号 5 次、每个 `clientKey` 20 次，只在单个进程内生效。多实例部署时需要实现 `RateLimiter` 接口并接入共享存储。
+- 更换 `subject.secret` 会改变所有用户的 `sub`。`sub` 与完整版 CQUT-Auth 的 Subject ID 不兼容，迁移时需要按 `schoolUid` 建立映射。
+- 使用这一层意味着你的后端会直接接触学校密码。不要把密码写入日志；有多应用单点登录或审计需求时，请部署 [CQUT-Auth](https://github.com/CQUT-OpenProject/CQUT-Auth)。
+
 ## 错误处理
 
 SDK 的已知认证与运行时错误使用强类型 `CasError`，可通过 `isCasErrorOfKind` 或 `error.kind` 进行分类处理：

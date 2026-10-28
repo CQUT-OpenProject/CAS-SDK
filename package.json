@@ -38,6 +38,16 @@
         "types": "./dist/crypto/index.d.cts",
         "default": "./dist/crypto/index.cjs"
       }
+    },
+    "./identity": {
+      "import": {
+        "types": "./dist/identity/index.d.ts",
+        "default": "./dist/identity/index.js"
+      },
+      "require": {
+        "types": "./dist/identity/index.d.cts",
+        "default": "./dist/identity/index.cjs"
+      }
     }
   },
   "license": "MIT",
@@ -69,7 +79,7 @@
     "verify": "vp check && vp test && vp run build && vp run check:package"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
+    "@types/node": "^24.19.2",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:"
@@ -77,5 +87,5 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@10.32.1"
+  "packageManager": "pnpm@10.34.9"
 }
