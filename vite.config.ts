@@ -3,7 +3,7 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
   pack: {
     deps: { resolveDepSubpath: true },
-    entry: ["src/index.ts", "src/crypto/index.ts"],
+    entry: ["src/index.ts", "src/crypto/index.ts", "src/identity/index.ts"],
     format: ["esm", "cjs"],
     tsconfig: "tsconfig.build.json",
     dts: false,

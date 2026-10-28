@@ -19,11 +19,11 @@ async function checkConsumer(name, source, types = false) {
   run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", source], dir);
   await writeFile(
     join(dir, "smoke.mjs"),
-    `import assert from 'node:assert/strict'; import { createCasClient } from '${pkg.name}'; import { getSecretParam } from '${pkg.name}/crypto'; assert.equal(typeof createCasClient().login,'function'); assert.ok(getSecretParam('synthetic'));`,
+    `import assert from 'node:assert/strict'; import { createCasClient } from '${pkg.name}'; import { getSecretParam } from '${pkg.name}/crypto'; import { createCampusVerifier, describeCampusVerifyError } from '${pkg.name}/identity'; assert.equal(typeof createCasClient().login,'function'); assert.ok(getSecretParam('synthetic')); assert.equal(typeof createCampusVerifier().verify,'function'); assert.ok(describeCampusVerifyError({code:'invalid_credentials'}));`,
   );
   await writeFile(
     join(dir, "smoke.cjs"),
-    `const assert=require('node:assert/strict'); const {createCasClient}=require('${pkg.name}'); const {getSecretParam}=require('${pkg.name}/crypto'); assert.equal(typeof createCasClient().login,'function'); assert.ok(getSecretParam('synthetic'));`,
+    `const assert=require('node:assert/strict'); const {createCasClient}=require('${pkg.name}'); const {getSecretParam}=require('${pkg.name}/crypto'); const {createCampusVerifier,describeCampusVerifyError}=require('${pkg.name}/identity'); assert.equal(typeof createCasClient().login,'function'); assert.ok(getSecretParam('synthetic')); assert.equal(typeof createCampusVerifier().verify,'function'); assert.ok(describeCampusVerifyError({code:'invalid_credentials'}));`,
   );
   run(node, ["smoke.mjs"], dir);
   run(node, ["smoke.cjs"], dir);
@@ -43,16 +43,18 @@ async function check(flag: boolean) {
   const safe = await sdk.createCasClient().safeLogin({...opts,validate:true});
   if (safe.ok) safe.data.validation;
   getSecretParam('synthetic');
+  const verified = await identity.createCampusVerifier().verify({account:'a',password:'b'});
+  if (verified.ok) verified.data.schoolUid; else identity.describeCampusVerifyError(verified.error);
 }
 `;
     await writeFile(
       join(dir, "consumer.mts"),
-      `import * as sdk from '${pkg.name}'; import {getSecretParam} from '${pkg.name}/crypto';\n` +
+      `import * as sdk from '${pkg.name}'; import {getSecretParam} from '${pkg.name}/crypto'; import * as identity from '${pkg.name}/identity';\n` +
         common,
     );
     await writeFile(
       join(dir, "consumer.cts"),
-      `import sdk = require('${pkg.name}'); import crypto = require('${pkg.name}/crypto'); const {getSecretParam}=crypto;\n` +
+      `import sdk = require('${pkg.name}'); import crypto = require('${pkg.name}/crypto'); const {getSecretParam}=crypto; import identity = require('${pkg.name}/identity');\n` +
         common,
     );
     await writeFile(
