@@ -32,7 +32,7 @@ GitHub Actions 会将编译产物发布到 `release` 分支。每个源码版本
 pnpm add github:CQUT-OpenProject/CAS-SDK#release
 
 # 或锁定具体版本
-pnpm add github:CQUT-OpenProject/CAS-SDK#v2.0.0
+pnpm add github:CQUT-OpenProject/CAS-SDK#v2.1.0
 
 # npm 和 yarn 也支持 GitHub 地址
 npm install github:CQUT-OpenProject/CAS-SDK#release
